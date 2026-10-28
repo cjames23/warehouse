@@ -52,6 +52,7 @@ from warehouse.forklift import metadata
 from warehouse.forklift.decorators import ensure_uploads_allowed, sanitize
 from warehouse.forklift.forms import UploadForm, _filetype_extension_mapping
 from warehouse.forklift.utils import _exc_with_message
+from warehouse.gating.interfaces import IGateService
 from warehouse.macaroons.models import Macaroon
 from warehouse.packaging.interfaces import IFileStorage, IProjectService
 from warehouse.packaging.metadata_verification import verify_email, verify_url
@@ -1896,8 +1897,23 @@ def file_upload(request):
         "warehouse.upload.ok", tags=[f"filetype:{form.filetype.data}"]
     )
 
-    # Dispatch our task to sync this to cache as soon as possible
-    request.task(sync_file_to_cache).delay(file_.id)
+    # Open any gates for this release before publishing it. With no policies
+    # registered this is a no-op. It runs on every upload, not just new
+    # releases: a file added to a cleared release reopens its gates.
+    gate_service = request.find_service(IGateService, context=None)
+    gates = gate_service.open_gates(release, request)
+
+    if gates:
+        # No sync_file_to_cache here: the file stays in archive storage only,
+        # so it is unfetchable rather than merely undiscoverable. IGateService
+        # dispatches the sync once the last gate clears.
+        request.metrics.increment(
+            "warehouse.upload.gated",
+            tags=[f"kind:{gate.kind}" for gate in gates],
+        )
+    else:
+        # Dispatch our task to sync this to cache as soon as possible
+        request.task(sync_file_to_cache).delay(file_.id)
 
     # Return any warnings that we've accumulated as the response body.
     return HTTPOk(body="\n".join(warnings))

@@ -69,6 +69,17 @@ def _copy_file_to_cache(archive_storage, cache_storage, path):
 def sync_file_to_cache(request, file_id):
     file = request.db.get(File, file_id)
 
+    if file and file.release.gated:
+        # The cache bucket is what the CDN serves, so a gated release's files
+        # must not land there. The upload view already skips this dispatch;
+        # this catches any other caller, such as a backfill or a retry.
+        logger.info(
+            "sync_file_to_cache_skipped_gated",
+            file_id=str(file_id),
+            release_id=str(file.release_id),
+        )
+        return
+
     if file and not file.cached:
         archive_storage = request.find_service(IFileStorage, name="archive")
         cache_storage = request.find_service(IFileStorage, name="cache")
@@ -113,7 +124,15 @@ def compute_packaging_metrics(request):
 def check_file_cache_tasks_outstanding(request):
     metrics = request.find_service(IMetricsService, context=None)
 
-    files_not_cached = request.db.query(File).filter_by(cached=False).count()
+    # Gated files are uncached by design, so counting them would make this
+    # gauge alert on normal gating rather than on a stuck cache-sync queue.
+    files_not_cached = (
+        request.db.query(File)
+        .filter_by(cached=False)
+        .join(Release)
+        .filter(Release.gated.is_(False))
+        .count()
+    )
 
     metrics.gauge(
         "warehouse.packaging.files.not_cached",
@@ -155,6 +174,10 @@ def reconcile_file_storages(request):
     files_batch = (
         request.db.query(File)
         .filter_by(cached=False)
+        # Gated releases are uncached on purpose, so they are not a gap for
+        # this sweep to close. See `warehouse.gating`.
+        .join(Release)
+        .filter(Release.gated.is_(False))
         .with_for_update(skip_locked=True, of=File)
         .limit(batch_size)
     )
