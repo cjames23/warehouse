@@ -4,10 +4,9 @@ Release gating is a reusable hold on a `Release`. While a gate blocks, the
 release is not installable: it is absent from the Simple index and the JSON
 API, and its artifacts are not in the bucket the CDN serves from.
 
-This is only the mechanism. **Warehouse registers no gates.** With nothing
-registered the mechanism is inert and uploads publish exactly as they did
-before it existed. A feature that needs to withhold releases brings its own
-`IGatePolicy`.
+This is the mechanism only. **Warehouse registers no gates.** With none
+registered, uploads take the same path they did before it existed. A feature
+that needs to withhold releases registers its own `IGatePolicy`.
 
 ## Why there are two enforcement points
 
@@ -61,10 +60,10 @@ Only `pending` and `failed` block. Everything else lets the release through, so
 a newly added status defaults to non-blocking and cannot silently strand
 releases that were already published.
 
-Gates are never deleted when they resolve, so a release carries an auditable
-record of what held it and why it was let go. A consequence worth knowing: gate
-rows outlive the policy that created them, so a `kind` is effectively permanent
-and renaming one orphans its history.
+Gates are never deleted when they resolve, so a release keeps an audit record
+of what held it and why it was released. Gate rows therefore outlive the policy
+that created them: a `kind` is effectively permanent, and renaming one orphans
+its history.
 
 `details` is a JSONB column the mechanism never reads. It is there so a policy
 can attach whatever evidence drove its decision without the generic schema
@@ -142,9 +141,8 @@ decision was about the files that existed at the time. The unique constraint on
 ## Administrative override
 
 `/admin/gating/` lists every gate currently withholding a release and offers a
-bypass. This exists because a `failed` gate is the one state nothing will
-resolve on its own. Without it, a release could be withheld permanently with no
-way to see why.
+bypass. A `failed` gate is the only state nothing resolves on its own, so
+without a manual bypass a release could be withheld permanently.
 
 A bypass is recorded as `bypassed` rather than `passed`, with the
 administrator's username in `resolved_by`, so the audit trail keeps the
@@ -185,5 +183,5 @@ FROM release_gates g JOIN releases r ON r.id = g.release_id
 ORDER BY g.created DESC;
 ```
 
-Taking the gate to `failed` is the case worth exercising by hand, since that is
-the state that needs the admin bypass at `/admin/gating/`.
+The `failed` state is the one that needs the admin bypass at `/admin/gating/`,
+so take a gate there to exercise that path.
