@@ -72,10 +72,9 @@ having to know the shape.
 
 ### `Release.gated`
 
-`Release.gated` is denormalized from the gate rows. The Simple index is one of
-the hottest queries in the application, and joining it against gate rows on
-every request is not worth the cost, so the read paths filter on this single
-indexed boolean instead.
+`Release.gated` is denormalized from the gate rows: a single indexed boolean
+the read paths filter on, so they do not join against the gate rows on every
+request.
 
 It is only ever written through `IGateService`, which recomputes it from the
 gates whenever one resolves. Writing it directly will desynchronize it from the
@@ -110,9 +109,9 @@ A policy decides only *whether a release needs this hold* and *how long it may
 stay pending*. It does not resolve its own gates; whatever does the work (a
 Celery task, a webhook) calls `IGateService.resolve`.
 
-Nothing stops a policy from resolving its gate the instant it has an answer,
-and that is usually the right design: the timeout is then a *ceiling* on the
-hold rather than a waiting period, and in the normal case it never fires.
+A policy may resolve its gate the instant it has an answer. The timeout is then
+a *ceiling* on the hold rather than a waiting period, and in that case it never
+fires.
 
 ### Timeouts
 
@@ -122,8 +121,7 @@ elapsing means for that policy:
 
 - `Passed`: waiting *is* the mechanism, so the window elapsing is the decision.
 - `Expired`: fail open after never getting an answer. Distinct from `Passed`
-  so the audit trail separates "decided favorably" from "gave up waiting", and
-  so the metric on it is alertable.
+  so the audit trail separates "decided favorably" from "gave up waiting".
 - `Failed`: fail closed, keep withholding.
 
 A policy with `timeout = None` waits indefinitely.
